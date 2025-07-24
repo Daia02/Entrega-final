@@ -1,0 +1,16 @@
+{
+  "name": "entrega-final",
+  "version": "1.0.0",
+  "description": "Sistema de Gestion de Productos con Express y Firebase",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "author": "Alonzo Daiana",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}
