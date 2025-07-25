@@ -12,10 +12,10 @@ app.get("/", (req, res) => {
   res.json({ message: "API Rest en Node.js" });
 });
 
-import productsRouter from "./src/routes/products.router.js";
+import productsRouter from "./src/routes/products.route.js";
 app.use("/api", productsRouter);
 
-import authRouter from "./src/routes/auth.router.js";
+import authRouter from "./src/routes/auth.route.js";
 app.use(authRouter);
 
 app.use((req, res, next) => {
