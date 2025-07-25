@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
-import bcrypt from "bcrypt";
+//import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 
 // Usuarios de ejemplo (en producción, esto debería estar en una base de datos)
 const users = [
