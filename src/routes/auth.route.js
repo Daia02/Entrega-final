@@ -6,7 +6,7 @@ import {
   refreshToken,
   changePassword
 } from "../controllers/auth.controller.js";
-import { auth } from "../middlewares/auth.js"; // asegúrate del path
+import { auth } from "../middlewares/auth.middleware.js"; 
 const router = Router();
 router.post("/login", login);
 router.post("/register", register);
