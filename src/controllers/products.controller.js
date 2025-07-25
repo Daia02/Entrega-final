@@ -1,346 +1,318 @@
-import jwt from "jsonwebtoken";
-import bcrypt from "bcrypt";
+import ProductsService from "../services/products.service.js";
 
-// Usuarios de ejemplo (en producción, esto debería estar en una base de datos)
-const users = [
-  {
-    id: "1",
-    username: "admin",
-    email: "admin@example.com",
-    password: "$2b$10$rQJbX.3y0nZ8fLGqF3XxLeaKgGfg4Nv8f8DzSi9xP2X2Gzw2zF2xO", // password: "admin123"
-    role: "admin"
-  },
-  {
-    id: "2",
-    username: "manager",
-    email: "manager@example.com",
-    password: "$2b$10$rQJbX.3y0nZ8fLGqF3XxLeaKgGfg4Nv8f8DzSi9xP2X2Gzw2zF2xO", // password: "manager123"
-    role: "manager"
-  }
-];
-
-// Validar configuración de JWT
-const validateJWTConfig = () => {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("JWT_SECRET no está configurado en las variables de entorno");
-  }
-  if (process.env.JWT_SECRET.length < 32) {
-    console.warn("⚠️  JWT_SECRET debería tener al menos 32 caracteres para mayor seguridad");
-  }
-};
-
-// Generar token JWT
-const generateToken = (user) => {
-  validateJWTConfig();
-  
-  return jwt.sign(
-    {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      role: user.role
-    },
-    process.env.JWT_SECRET,
-    {
-      expiresIn: process.env.JWT_EXPIRES_IN || "24h",
-      issuer: "auth-service",
-      audience: "app-users"
-    }
-  );
-};
-
-// Validar formato de email
-const isValidEmail = (email) => {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
-};
-
-// Validar fortaleza de contraseña
-const isValidPassword = (password) => {
-  // Al menos 8 caracteres, una mayúscula, una minúscula, un número
-  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,}$/;
-  return passwordRegex.test(password);
-};
-
-// Login
-export const login = async (req, res) => {
+// Obtener todos los productos
+export const getAllProducts = async (req, res) => {
   try {
-    const { username, password } = req.body;
-
-    // Validar datos de entrada
-    if (!username || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Usuario y contraseña son requeridos"
-      });
-    }
-
-    // Sanitizar entrada
-    const sanitizedUsername = username.trim().toLowerCase();
-
-    // Buscar usuario
-    const user = users.find(u => 
-      u.username.toLowerCase() === sanitizedUsername || 
-      u.email.toLowerCase() === sanitizedUsername
-    );
+    const { page = 1, limit = 10 } = req.query;
+    const pageSize = parseInt(limit);
+    const currentPage = parseInt(page);
     
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: "Credenciales inválidas"
-      });
-    }
-
-    // Verificar contraseña
-    const isPasswordValid = await bcrypt.compare(password, user.password);
+    // Para paginación más avanzada, necesitarías implementar cursor-based pagination
+    const result = await ProductsService.getAllProducts(pageSize);
     
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        message: "Credenciales inválidas"
-      });
-    }
-
-    // Generar token
-    const token = generateToken(user);
-
-    // Respuesta exitosa (no incluir la contraseña)
     res.status(200).json({
       success: true,
-      message: "Login exitoso",
-      data: {
-        user: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          role: user.role
-        },
-        token,
-        expiresIn: process.env.JWT_EXPIRES_IN || "24h"
+      data: result.products,
+      pagination: {
+        currentPage,
+        pageSize,
+        hasMore: result.hasMore,
+        totalItems: result.products.length
       }
     });
-
   } catch (error) {
-    console.error("Error en login:", error);
+    console.error("Error en getAllProducts:", error);
     res.status(500).json({
       success: false,
-      message: "Error interno del servidor"
+      message: "Error interno del servidor",
+      error: error.message
     });
   }
 };
 
-// Registro
-export const register = async (req, res) => {
+// Buscar productos
+export const searchProduct = async (req, res) => {
   try {
-    const { username, email, password } = req.body;
-
-    // Validar datos de entrada
-    if (!username || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Usuario, email y contraseña son requeridos"
-      });
-    }
-
-    // Validar formato de email
-    if (!isValidEmail(email)) {
-      return res.status(400).json({
-        success: false,
-        message: "Formato de email inválido"
-      });
-    }
-
-    // Validar fortaleza de contraseña
-    if (!isValidPassword(password)) {
-      return res.status(400).json({
-        success: false,
-        message: "La contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número"
-      });
-    }
-
-    // Sanitizar datos
-    const sanitizedUsername = username.trim().toLowerCase();
-    const sanitizedEmail = email.trim().toLowerCase();
-
-    // Verificar si el usuario ya existe
-    const existingUser = users.find(u => 
-      u.username.toLowerCase() === sanitizedUsername || 
-      u.email.toLowerCase() === sanitizedEmail
-    );
+    const { q, categoria, marca, minPrice, maxPrice, destacado, rgb, disponibilidad } = req.query;
     
-    if (existingUser) {
-      return res.status(409).json({
-        success: false,
-        message: "El usuario o email ya existe"
-      });
-    }
-
-    // Hash de la contraseña
-    const saltRounds = 12; // Incrementado para mayor seguridad
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-    // Crear nuevo usuario (en producción, guardar en BD)
-    const newUser = {
-      id: Date.now().toString(),
-      username: sanitizedUsername,
-      email: sanitizedEmail,
-      password: hashedPassword,
-      role: "user", // rol por defecto
-      createdAt: new Date().toISOString()
+    const filters = {
+      categoria,
+      marca,
+      minPrice,
+      maxPrice,
+      destacado: destacado === 'true' ? true : destacado === 'false' ? false : undefined,
+      rgb: rgb === 'true' ? true : rgb === 'false' ? false : undefined,
+      disponibilidad
     };
 
-    users.push(newUser);
+    // Remover filtros undefined
+    Object.keys(filters).forEach(key => filters[key] === undefined && delete filters[key]);
 
-    // Generar token
-    const token = generateToken(newUser);
-
-    res.status(201).json({
-      success: true,
-      message: "Usuario registrado exitosamente",
-      data: {
-        user: {
-          id: newUser.id,
-          username: newUser.username,
-          email: newUser.email,
-          role: newUser.role,
-          createdAt: newUser.createdAt
-        },
-        token,
-        expiresIn: process.env.JWT_EXPIRES_IN || "24h"
-      }
-    });
-
-  } catch (error) {
-    console.error("Error en register:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error interno del servidor"
-    });
-  }
-};
-
-// Obtener perfil del usuario autenticado
-export const getProfile = (req, res) => {
-  try {
-    // req.user debe ser añadido por el middleware de autenticación
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: "Usuario no autenticado"
-      });
-    }
-
+    const products = await ProductsService.searchProducts(q, filters);
+    
     res.status(200).json({
       success: true,
-      message: "Perfil obtenido exitosamente",
-      data: {
-        user: {
-          id: req.user.id,
-          username: req.user.username,
-          email: req.user.email,
-          role: req.user.role
-        }
-      }
+      data: products,
+      count: products.length,
+      searchTerm: q,
+      filters: filters
     });
   } catch (error) {
-    console.error("Error en getProfile:", error);
+    console.error("Error en searchProduct:", error);
     res.status(500).json({
       success: false,
-      message: "Error interno del servidor"
+      message: "Error al buscar productos",
+      error: error.message
     });
   }
 };
 
-// Refresh token
-export const refreshToken = (req, res) => {
+// Obtener producto por ID
+export const getProductById = async (req, res) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: "Usuario no autenticado"
-      });
-    }
-
-    const user = req.user;
-    const newToken = generateToken(user);
-
-    res.status(200).json({
-      success: true,
-      message: "Token renovado exitosamente",
-      data: {
-        token: newToken,
-        expiresIn: process.env.JWT_EXPIRES_IN || "24h"
-      }
-    });
-  } catch (error) {
-    console.error("Error en refreshToken:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error interno del servidor"
-    });
-  }
-};
-
-
-
-// Cambiar contraseña
-export const changePassword = async (req, res) => {
-  try {
-    const { currentPassword, newPassword } = req.body;
-    const userId = req.user.id;
-
-    if (!currentPassword || !newPassword) {
+    const { id } = req.params;
+    
+    if (!id) {
       return res.status(400).json({
         success: false,
-        message: "Contraseña actual y nueva contraseña son requeridas"
+        message: "ID del producto es requerido"
       });
     }
 
-    // Validar nueva contraseña
-    if (!isValidPassword(newPassword)) {
-      return res.status(400).json({
-        success: false,
-        message: "La nueva contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número"
-      });
-    }
-
-    // Buscar usuario
-    const userIndex = users.findIndex(u => u.id === userId);
-    if (userIndex === -1) {
+    const product = await ProductsService.getProductById(id);
+    
+    if (!product) {
       return res.status(404).json({
         success: false,
-        message: "Usuario no encontrado"
+        message: "Producto no encontrado"
       });
     }
-
-    const user = users[userIndex];
-
-    // Verificar contraseña actual
-    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
-    if (!isCurrentPasswordValid) {
-      return res.status(400).json({
-        success: false,
-        message: "Contraseña actual incorrecta"
-      });
-    }
-
-    // Hash de la nueva contraseña
-    const saltRounds = 12;
-    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
-
-    // Actualizar contraseña
-    users[userIndex].password = hashedNewPassword;
 
     res.status(200).json({
       success: true,
-      message: "Contraseña cambiada exitosamente"
+      data: product
     });
-
   } catch (error) {
-    console.error("Error en changePassword:", error);
+    console.error("Error en getProductById:", error);
     res.status(500).json({
       success: false,
-      message: "Error interno del servidor"
+      message: "Error al obtener el producto",
+      error: error.message
+    });
+  }
+};
+
+// Obtener productos destacados
+export const getFeaturedProducts = async (req, res) => {
+  try {
+    const products = await ProductsService.getFeaturedProducts();
+    
+    res.status(200).json({
+      success: true,
+      data: products,
+      count: products.length
+    });
+  } catch (error) {
+    console.error("Error en getFeaturedProducts:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error al obtener productos destacados",
+      error: error.message
+    });
+  }
+};
+
+// Obtener productos por categoría
+export const getProductsByCategory = async (req, res) => {
+  try {
+    const { categoria } = req.params;
+    
+    if (!categoria) {
+      return res.status(400).json({
+        success: false,
+        message: "Categoría es requerida"
+      });
+    }
+
+    const products = await ProductsService.getProductsByCategory(categoria);
+    
+    res.status(200).json({
+      success: true,
+      data: products,
+      categoria,
+      count: products.length
+    });
+  } catch (error) {
+    console.error("Error en getProductsByCategory:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error al obtener productos por categoría",
+      error: error.message
+    });
+  }
+};
+
+// Crear producto
+export const createProduct = async (req, res) => {
+  try {
+    const productData = req.body;
+    
+    // Validaciones básicas
+    if (!productData.nombre || !productData.precio || !productData.categoria) {
+      return res.status(400).json({
+        success: false,
+        message: "Nombre, precio y categoría son campos requeridos"
+      });
+    }
+
+    const newProduct = await ProductsService.createProduct(productData);
+    
+    res.status(201).json({
+      success: true,
+      message: "Producto creado exitosamente",
+      data: newProduct
+    });
+  } catch (error) {
+    console.error("Error en createProduct:", error);
+    res.status(400).json({
+      success: false,
+      message: error.message || "Error al crear el producto",
+      error: error.message
+    });
+  }
+};
+
+// Actualizar producto
+export const updateProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const productData = req.body;
+    
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "ID del producto es requerido"
+      });
+    }
+
+    const updatedProduct = await ProductsService.updateProduct(id, productData);
+    
+    if (!updatedProduct) {
+      return res.status(404).json({
+        success: false,
+        message: "Producto no encontrado"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Producto actualizado exitosamente",
+      data: updatedProduct
+    });
+  } catch (error) {
+    console.error("Error en updateProduct:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error al actualizar el producto",
+      error: error.message
+    });
+  }
+};
+
+// Eliminar producto
+export const deleteProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "ID del producto es requerido"
+      });
+    }
+
+    const deleted = await ProductsService.deleteProduct(id);
+    
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Producto no encontrado"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Producto eliminado exitosamente"
+    });
+  } catch (error) {
+    console.error("Error en deleteProduct:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error al eliminar el producto",
+      error: error.message
+    });
+  }
+};
+
+// Actualizar stock
+export const updateStock = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { stock } = req.body;
+    
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "ID del producto es requerido"
+      });
+    }
+
+    if (stock === undefined || stock < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Stock debe ser un número válido mayor o igual a 0"
+      });
+    }
+
+    const updatedProduct = await ProductsService.updateStock(id, parseInt(stock));
+    
+    if (!updatedProduct) {
+      return res.status(404).json({
+        success: false,
+        message: "Producto no encontrado"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Stock actualizado exitosamente",
+      data: updatedProduct
+    });
+  } catch (error) {
+    console.error("Error en updateStock:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error al actualizar el stock",
+      error: error.message
+    });
+  }
+};
+
+// Obtener estadísticas
+export const getProductStats = async (req, res) => {
+  try {
+    const stats = await ProductsService.getProductStats();
+    
+    res.status(200).json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    console.error("Error en getProductStats:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error al obtener estadísticas",
+      error: error.message
     });
   }
 };

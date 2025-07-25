@@ -19,8 +19,20 @@ const users = [
   }
 ];
 
+// Validar configuración de JWT
+const validateJWTConfig = () => {
+  if (!process.env.JWT_SECRET) {
+    throw new Error("JWT_SECRET no está configurado en las variables de entorno");
+  }
+  if (process.env.JWT_SECRET.length < 32) {
+    console.warn("⚠️  JWT_SECRET debería tener al menos 32 caracteres para mayor seguridad");
+  }
+};
+
 // Generar token JWT
 const generateToken = (user) => {
+  validateJWTConfig();
+  
   return jwt.sign(
     {
       id: user.id,
@@ -30,9 +42,24 @@ const generateToken = (user) => {
     },
     process.env.JWT_SECRET,
     {
-      expiresIn: process.env.JWT_EXPIRES_IN || "24h"
+      expiresIn: process.env.JWT_EXPIRES_IN || "24h",
+      issuer: "auth-service",
+      audience: "app-users"
     }
   );
+};
+
+// Validar formato de email
+const isValidEmail = (email) => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+};
+
+// Validar fortaleza de contraseña
+const isValidPassword = (password) => {
+  // Al menos 8 caracteres, una mayúscula, una minúscula, un número
+  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,}$/;
+  return passwordRegex.test(password);
 };
 
 // Login
@@ -48,8 +75,14 @@ export const login = async (req, res) => {
       });
     }
 
+    // Sanitizar entrada
+    const sanitizedUsername = username.trim().toLowerCase();
+
     // Buscar usuario
-    const user = users.find(u => u.username === username || u.email === username);
+    const user = users.find(u => 
+      u.username.toLowerCase() === sanitizedUsername || 
+      u.email.toLowerCase() === sanitizedUsername
+    );
     
     if (!user) {
       return res.status(401).json({
@@ -59,9 +92,9 @@ export const login = async (req, res) => {
     }
 
     // Verificar contraseña
-    const isValidPassword = await bcrypt.compare(password, user.password);
+    const isPasswordValid = await bcrypt.compare(password, user.password);
     
-    if (!isValidPassword) {
+    if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
         message: "Credenciales inválidas"
@@ -91,13 +124,12 @@ export const login = async (req, res) => {
     console.error("Error en login:", error);
     res.status(500).json({
       success: false,
-      message: "Error interno del servidor",
-      error: error.message
+      message: "Error interno del servidor"
     });
   }
 };
 
-// Registro (opcional)
+// Registro
 export const register = async (req, res) => {
   try {
     const { username, email, password } = req.body;
@@ -110,8 +142,31 @@ export const register = async (req, res) => {
       });
     }
 
+    // Validar formato de email
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Formato de email inválido"
+      });
+    }
+
+    // Validar fortaleza de contraseña
+    if (!isValidPassword(password)) {
+      return res.status(400).json({
+        success: false,
+        message: "La contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número"
+      });
+    }
+
+    // Sanitizar datos
+    const sanitizedUsername = username.trim().toLowerCase();
+    const sanitizedEmail = email.trim().toLowerCase();
+
     // Verificar si el usuario ya existe
-    const existingUser = users.find(u => u.username === username || u.email === email);
+    const existingUser = users.find(u => 
+      u.username.toLowerCase() === sanitizedUsername || 
+      u.email.toLowerCase() === sanitizedEmail
+    );
     
     if (existingUser) {
       return res.status(409).json({
@@ -121,16 +176,17 @@ export const register = async (req, res) => {
     }
 
     // Hash de la contraseña
-    const saltRounds = 10;
+    const saltRounds = 12; // Incrementado para mayor seguridad
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Crear nuevo usuario (en producción, guardar en BD)
     const newUser = {
       id: Date.now().toString(),
-      username,
-      email,
+      username: sanitizedUsername,
+      email: sanitizedEmail,
       password: hashedPassword,
-      role: "user" // rol por defecto
+      role: "user", // rol por defecto
+      createdAt: new Date().toISOString()
     };
 
     users.push(newUser);
@@ -146,7 +202,8 @@ export const register = async (req, res) => {
           id: newUser.id,
           username: newUser.username,
           email: newUser.email,
-          role: newUser.role
+          role: newUser.role,
+          createdAt: newUser.createdAt
         },
         token,
         expiresIn: process.env.JWT_EXPIRES_IN || "24h"
@@ -157,8 +214,7 @@ export const register = async (req, res) => {
     console.error("Error en register:", error);
     res.status(500).json({
       success: false,
-      message: "Error interno del servidor",
-      error: error.message
+      message: "Error interno del servidor"
     });
   }
 };
@@ -166,18 +222,31 @@ export const register = async (req, res) => {
 // Obtener perfil del usuario autenticado
 export const getProfile = (req, res) => {
   try {
+    // req.user debe ser añadido por el middleware de autenticación
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Usuario no autenticado"
+      });
+    }
+
     res.status(200).json({
       success: true,
+      message: "Perfil obtenido exitosamente",
       data: {
-        user: req.user
+        user: {
+          id: req.user.id,
+          username: req.user.username,
+          email: req.user.email,
+          role: req.user.role
+        }
       }
     });
   } catch (error) {
     console.error("Error en getProfile:", error);
     res.status(500).json({
       success: false,
-      message: "Error interno del servidor",
-      error: error.message
+      message: "Error interno del servidor"
     });
   }
 };
@@ -185,6 +254,13 @@ export const getProfile = (req, res) => {
 // Refresh token
 export const refreshToken = (req, res) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Usuario no autenticado"
+      });
+    }
+
     const user = req.user;
     const newToken = generateToken(user);
 
@@ -200,5 +276,71 @@ export const refreshToken = (req, res) => {
     console.error("Error en refreshToken:", error);
     res.status(500).json({
       success: false,
-      message: "Error interno del servidor",
-      error: error.message
+      message: "Error interno del servidor"
+    });
+  }
+};
+
+
+
+// Cambiar contraseña
+export const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user.id;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Contraseña actual y nueva contraseña son requeridas"
+      });
+    }
+
+    // Validar nueva contraseña
+    if (!isValidPassword(newPassword)) {
+      return res.status(400).json({
+        success: false,
+        message: "La nueva contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número"
+      });
+    }
+
+    // Buscar usuario
+    const userIndex = users.findIndex(u => u.id === userId);
+    if (userIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Usuario no encontrado"
+      });
+    }
+
+    const user = users[userIndex];
+
+    // Verificar contraseña actual
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({
+        success: false,
+        message: "Contraseña actual incorrecta"
+      });
+    }
+
+    // Hash de la nueva contraseña
+    const saltRounds = 12;
+    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Actualizar contraseña
+    users[userIndex].password = hashedNewPassword;
+
+    res.status(200).json({
+      success: true,
+      message: "Contraseña cambiada exitosamente"
+    });
+
+  } catch (error) {
+    console.error("Error en changePassword:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor"
+    });
+  }
+};
